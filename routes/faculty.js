@@ -5,89 +5,358 @@ const { signPayload } = require("../utils/qr");
 
 const router = express.Router();
 
+/* ------------------------- Helpers ------------------------- */
+function formatDate() {
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${dd}_${mm}`;
+}
+
+function error(res, status, message, code) {
+  return res.status(status).json({
+    success: false,
+    message,
+    errorCode: code,
+  });
+}
+
+/* -------------------- Start Session -------------------- */
 router.post("/session/start", async (req, res) => {
-  const session = await Session.create({
-    sessionId: `AUD_${Date.now()}`,
-    facultyId: req.body.facultyId,
-    location: req.body.location,
-    radius: 50,
-    audi:req.body.audi,
-    startTime: new Date()
-  });
+  try {
+    const {
+      facultyId,
+      classId,
+      className,
+      blockName,
+      hourNumber,
+      location,
+    } = req.body;
 
-  res.json(session);
+    if (
+      !facultyId ||
+      !classId ||
+      !className ||
+      !blockName ||
+      !hourNumber ||
+      !location?.lat ||
+      !location?.lng
+    ) {
+      return error(
+        res,
+        400,
+        "Missing required session details",
+        "MISSING_FIELDS"
+      );
+    }
+
+    const sessionId = `${className}_H${hourNumber}_${formatDate()}`;
+
+    const existing = await Session.findOne({ sessionId });
+    if (existing) {
+      return error(
+        res,
+        409,
+        "Session already exists for this hour",
+        "SESSION_ALREADY_EXISTS"
+      );
+    }
+
+    const session = await Session.create({
+      sessionId,
+      facultyId,
+      classId,
+      className,
+      blockName,
+      hourNumber,
+      location,
+      radius: 50,
+      startTime: new Date(),
+      state: "CREATED",
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Session started successfully",
+      data: session,
+    });
+  } catch (err) {
+    console.error("Session start error:", err);
+    return error(
+      res,
+      500,
+      "Unable to start session",
+      "SESSION_START_FAILED"
+    );
+  }
 });
 
+/* -------------------- Generate QR -------------------- */
 router.post("/session/qr", async (req, res) => {
-  const { sessionId, type, audi } = req.body;
+  try {
+    const { sessionId, type, qrExpirySeconds } = req.body;
 
-  const session = await Session.findOne({ sessionId });
-  if (!session) return res.status(404).send("Session not found");
+    if (!sessionId || !type) {
+      return error(
+        res,
+        400,
+        "sessionId and type are required",
+        "INVALID_QR_REQUEST"
+      );
+    }
 
-  session.state = type === "START" ? "START_ACTIVE" : "END_ACTIVE";
-  if (type === "END") session.endTime = new Date();
-  await session.save();
+    if (!["START", "END"].includes(type)) {
+      return error(
+        res,
+        400,
+        "Invalid QR type",
+        "INVALID_QR_TYPE"
+      );
+    }
 
+    const session = await Session.findOne({ sessionId });
+    if (!session) {
+      return error(
+        res,
+        404,
+        "Session not found",
+        "SESSION_NOT_FOUND"
+      );
+    }
 
-  // 10.768554, 79.103301 - Dummy Data Home Location
-  // 10.764479, 79.126183 - Dummy Data Mall Location
-  // 10.728720, 79.020181 - KRC Library Location
-  // 10.7283089, 79.0197605 - KRC Library New Location
+    session.state = type === "START" ? "START_ACTIVE" : "END_ACTIVE";
+    if (type === "END") session.endTime = new Date();
+    await session.save();
 
-  // 10.7274146,79.0193826 - VV Auditorium
-  // 10.728649, 79.020686  - TDC Auditorium
-  // 10.7287991,79.0199514 - SoC Auditorium
-  // 10.7292073,79.0192644 - Tifac Auditorium
+    const expiryMs = Number(qrExpirySeconds) * 1000;
+    if (!expiryMs || expiryMs <= 0) {
+      return error(
+        res,
+        400,
+        "Invalid QR expiry time",
+        "INVALID_QR_EXPIRY"
+      );
+    }
 
-  const qrData = signPayload({
-    sessionId,
-    type,
-    issuedAt: Date.now(),
-      auditorium: {
-    id: "AUDI_001",
-    lat: 10.768554,
-    lng: 79.103301,
-    radius: 100 // meters
-  },
-  expiresAt: Date.now() + 2 * 60 * 1000 // 2 minutes
-  });
+    const qrData = signPayload({
+      sessionId: session.sessionId,
+      type,
+      issuedAt: Date.now(),
+      classId: session.classId,
+      hourNumber: session.hourNumber,
+      blockName: session.blockName,
+      location: {
+        lat: session.location.lat,
+        lng: session.location.lng,
+        radius: session.radius,
+      },
+      expiresAt: Date.now() + expiryMs,
+    });
 
-  res.json(qrData);
+    return res.json({
+      success: true,
+      message: "QR generated successfully",
+      data: qrData,
+    });
+  } catch (err) {
+    console.error("QR generation error:", err);
+    return error(
+      res,
+      500,
+      "Failed to generate QR",
+      "QR_GENERATION_FAILED"
+    );
+  }
 });
 
+/* -------------------- Close Session -------------------- */
 router.post("/session/close", async (req, res) => {
-  await Session.updateOne(
-    { sessionId: req.body.sessionId },
-    { state: "CLOSED" }
-  );
-  res.send("Session closed");
+  try {
+    const { sessionId } = req.body;
+
+    if (!sessionId) {
+      return error(
+        res,
+        400,
+        "sessionId is required",
+        "SESSION_ID_REQUIRED"
+      );
+    }
+
+    const session = await Session.findOne({ sessionId });
+    if (!session) {
+      return error(
+        res,
+        404,
+        "Session not found",
+        "SESSION_NOT_FOUND"
+      );
+    }
+
+    if (session.state === "CLOSED") {
+      return error(
+        res,
+        409,
+        "Session already closed",
+        "SESSION_ALREADY_CLOSED"
+      );
+    }
+
+    const result = await Attendance.updateMany(
+      {
+        sessionId,
+        $or: [
+          { status: { $exists: false } },
+          { status: null },
+          { status: "INCOMPLETE" },
+        ],
+      },
+      {
+        $set: {
+          status: "ABSENT",
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    session.state = "CLOSED";
+    session.endTime = new Date();
+    await session.save();
+
+    return res.json({
+      success: true,
+      message: "Session closed and attendance finalized",
+      data: {
+        absentMarked: result.modifiedCount,
+      },
+    });
+  } catch (err) {
+    console.error("Session close error:", err);
+    return error(
+      res,
+      500,
+      "Failed to close session",
+      "SESSION_CLOSE_FAILED"
+    );
+  }
 });
 
+/* -------------------- Get All Sessions (Faculty) -------------------- */
+router.get("/sessions/all/:fId", async (req, res) => {
+  try {
+    const sessions = await Session.find({ facultyId: req.params.fId });
 
+    if (!sessions.length) {
+      return error(
+        res,
+        404,
+        "No sessions found for faculty",
+        "NO_SESSIONS"
+      );
+    }
 
-router.get("/sessions/all/:fId",(req,res)=>{
-    Session.find({facultyId:req.params.fId}).then((conducted)=>{
-        console.log(conducted);
-        // console.log(attended[0].saved_buses);
-        if(conducted.length!=0){
-          res.json({msg:"Success",data:conducted});
-        }else{
-          res.status(404).json({msg:"Failed"});
-        }
-    })
-})
-router.get("/session/:sId/attendance",(req,res)=>{
-    Attendance.find({sessionId:req.params.sId}).then((attendedStudents)=>{
-        console.log(attendedStudents);
-        // console.log(attended[0].saved_buses);
-        if(attendedStudents.length!=0){
-          res.json({msg:"Success",data:attendedStudents});
-        }else{
-          res.status(404).json({msg:"Failed"});
-        }
-    })
-})
+    return res.json({
+      success: true,
+      message: "Sessions fetched successfully",
+      data: sessions,
+    });
+  } catch (err) {
+    console.error(err);
+    return error(
+      res,
+      500,
+      "Failed to fetch sessions",
+      "FETCH_SESSIONS_FAILED"
+    );
+  }
+});
 
+/* -------------------- Get Attendance (Session) -------------------- */
+router.get("/session/:sId/attendance", async (req, res) => {
+  try {
+    const records = await Attendance.find({
+      sessionId: req.params.sId,
+    });
 
+    if (!records.length) {
+      return error(
+        res,
+        404,
+        "No attendance records found",
+        "NO_ATTENDANCE"
+      );
+    }
+
+    return res.json({
+      success: true,
+      message: "Attendance fetched successfully",
+      data: records,
+    });
+  } catch (err) {
+    console.error(err);
+    return error(
+      res,
+      500,
+      "Failed to fetch attendance",
+      "FETCH_ATTENDANCE_FAILED"
+    );
+  }
+});
+
+/* -------------------- Update Attendance -------------------- */
+router.put("/session/:sId/attendance", async (req, res) => {
+  try {
+    const { sId } = req.params;
+    const { attendance } = req.body;
+
+    if (!Array.isArray(attendance)) {
+      return error(
+        res,
+        400,
+        "Attendance must be an array",
+        "INVALID_ATTENDANCE_DATA"
+      );
+    }
+
+    const bulkOps = attendance
+      .filter((a) => a.studentId && a.status)
+      .map((a) => ({
+        updateOne: {
+          filter: { sessionId: sId, studentId: a.studentId },
+          update: {
+            $set: {
+              status: a.status,
+              updatedAt: new Date(),
+            },
+          },
+          upsert: true,
+        },
+      }));
+
+    if (!bulkOps.length) {
+      return error(
+        res,
+        400,
+        "No valid attendance records provided",
+        "EMPTY_ATTENDANCE"
+      );
+    }
+
+    await Attendance.bulkWrite(bulkOps);
+
+    return res.json({
+      success: true,
+      message: "Attendance saved successfully",
+    });
+  } catch (err) {
+    console.error(err);
+    return error(
+      res,
+      500,
+      "Failed to save attendance",
+      "ATTENDANCE_SAVE_FAILED"
+    );
+  }
+});
 
 module.exports = router;
