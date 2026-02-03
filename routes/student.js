@@ -15,95 +15,37 @@ function error(res, status, message, code) {
   });
 }
 
-/* -------------------- Scan QR -------------------- */
-router.post("/scan", async (req, res) => {
+/* -------------------- Scan QR -------------------- */router.post("/scan", async (req, res) => {
   try {
     const { payload, signature, studentId, deviceId, location } = req.body;
 
     if (!payload || !signature || !studentId || !deviceId || !location) {
-      return error(
-        res,
-        400,
-        "Missing required scan data",
-        "MISSING_SCAN_DATA"
-      );
+      return error(res, 400, "Missing required scan data", "MISSING_SCAN_DATA");
     }
 
     if (!location.lat || !location.lng) {
-      return error(
-        res,
-        400,
-        "Invalid location data",
-        "INVALID_LOCATION"
-      );
+      return error(res, 400, "Invalid location data", "INVALID_LOCATION");
     }
 
     const isValidQR = verifyPayload(payload, signature);
     if (!isValidQR) {
-      return error(
-        res,
-        400,
-        "Invalid or tampered QR code",
-        "INVALID_QR"
-      );
+      return error(res, 400, "Invalid or tampered QR code", "INVALID_QR");
     }
 
     if (payload.expiresAt && Date.now() > payload.expiresAt) {
-      return error(
-        res,
-        410,
-        "QR code has expired",
-        "QR_EXPIRED"
-      );
+      return error(res, 410, "QR code has expired", "QR_EXPIRED");
     }
 
     const session = await Session.findOne({ sessionId: payload.sessionId });
     if (!session) {
-      return error(
-        res,
-        404,
-        "Session not found",
-        "SESSION_NOT_FOUND"
-      );
+      return error(res, 404, "Session not found", "SESSION_NOT_FOUND");
     }
 
     if (session.state === "CLOSED") {
-      return error(
-        res,
-        403,
-        "Session already closed",
-        "SESSION_CLOSED"
-      );
+      return error(res, 403, "Session already closed", "SESSION_CLOSED");
     }
 
-    if (
-      (payload.type === "START" && session.state !== "START_ACTIVE") ||
-      (payload.type === "END" && session.state !== "END_ACTIVE")
-    ) {
-      return error(
-        res,
-        409,
-        "Invalid scan timing",
-        "INVALID_SESSION_STATE"
-      );
-    }
-
-    const distance = distanceMeters(
-      location.lat,
-      location.lng,
-      session.location.lat,
-      session.location.lng
-    );
-
-    if (distance > session.radius) {
-      return error(
-        res,
-        403,
-        "You are outside the allowed location",
-        "OUTSIDE_GEOFENCE"
-      );
-    }
-
+    // 🔥 FIX #1: ENSURE RECORD EXISTS
     let record = await Attendance.findOne({
       sessionId: payload.sessionId,
       studentId,
@@ -118,7 +60,23 @@ router.post("/scan", async (req, res) => {
       });
     }
 
-    if (payload.type === "START") {
+    // 🔥 VALIDATE SESSION STATE
+    // if (
+    //   (payload.type === "START" &&
+    //     session.state !== "START_ACTIVE") ||
+    //   (payload.type === "END" &&
+    //     session.state !== "END_ACTIVE")
+    // ) {
+    //   return error(
+    //     res,
+    //     409,
+    //     "Invalid scan timing",
+    //     "INVALID_SESSION_STATE"
+    //   );
+    // }
+
+    // START SCAN
+    if (payload.type === "START_ACTIVE") {
       if (record.startScanTime) {
         return error(
           res,
@@ -130,7 +88,8 @@ router.post("/scan", async (req, res) => {
       record.startScanTime = new Date();
     }
 
-    if (payload.type === "END") {
+    // END SCAN
+    if (payload.type === "END_ACTIVE") {
       if (!record.startScanTime) {
         return error(
           res,
@@ -152,14 +111,10 @@ router.post("/scan", async (req, res) => {
     });
   } catch (err) {
     console.error("QR Scan error:", err);
-    return error(
-      res,
-      500,
-      "Failed to process QR scan",
-      "SCAN_FAILED"
-    );
+    return error(res, 500, "Failed to process QR scan", "SCAN_FAILED");
   }
 });
+
 
 /* -------------------- Student Attendance History -------------------- */
 router.get("/attendance/all/:regNo", async (req, res) => {

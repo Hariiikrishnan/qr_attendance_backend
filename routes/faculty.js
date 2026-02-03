@@ -72,7 +72,7 @@ router.post("/session/start", async (req, res) => {
       location,
       radius: 50,
       startTime: new Date(),
-      state: "CREATED",
+      state: "START_ACTIVE",
     });
 
     return res.status(201).json({
@@ -105,7 +105,7 @@ router.post("/session/qr", async (req, res) => {
       );
     }
 
-    if (!["START", "END"].includes(type)) {
+    if (!["START_ACTIVE", "END_ACTIVE"].includes(type)) {
       return error(
         res,
         400,
@@ -123,9 +123,10 @@ router.post("/session/qr", async (req, res) => {
         "SESSION_NOT_FOUND"
       );
     }
-
-    session.state = type === "START" ? "START_ACTIVE" : "END_ACTIVE";
-    if (type === "END") session.endTime = new Date();
+session.state = type;
+if (type === "END_ACTIVE") {
+  session.endTime = new Date();
+}
     await session.save();
 
     const expiryMs = Number(qrExpirySeconds) * 1000;

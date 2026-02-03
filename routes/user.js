@@ -172,7 +172,7 @@ router.get("/recent", async (req, res) => {
     const sessions = await Session.find({ facultyId })
       .sort({ createdAt: -1 })
       .limit(10);
-
+   
     return res.json({
       success: true,
       message: "Recent sessions fetched",
