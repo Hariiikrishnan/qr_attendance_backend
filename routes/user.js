@@ -53,31 +53,43 @@ const upload = multer({
 router.post("/addFaculty/:uid", async (req, res) => {
   try {
     const { uid } = req.params;
-    const { role, facultyID, email } = req.body;
+    const { role, email, facultyID } = req.body;
 
     if (!uid || !email || !role) {
-      return error(
-        res,
-        400,
-        "Missing required user details",
-        "MISSING_USER_DATA"
-      );
-    }
-
-    let user = await User.findOne({ firebaseUid: uid });
-
-    if (!user) {
-      user = await User.create({
-        firebaseUid: uid,
-        email,
-        role,
-        facultyID: role === "faculty" ? facultyID : null,
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields",
       });
     }
 
+    const update = {
+      email,
+      role,
+    };
+
+    // Only set facultyID if provided
+    if (facultyID) {
+      update.facultyID = facultyID;
+    }
+
+    const user = await User.findOneAndUpdate(
+      { firebaseUid: uid },
+      {
+        $setOnInsert: {
+          firebaseUid: uid,
+          createdAt: new Date(),
+        },
+        $set: update,
+      },
+      {
+        new: true,
+        upsert: true, // 🔥 prevents duplicate insert
+      }
+    );
+
     return res.json({
       success: true,
-      message: "User authenticated successfully",
+      message: "User synced successfully",
       data: {
         userId: user._id,
         role: user.role,
@@ -86,10 +98,15 @@ router.post("/addFaculty/:uid", async (req, res) => {
       },
     });
   } catch (err) {
-    console.error(err);
-    return error(res, 500, "Failed to create user", "USER_CREATE_FAILED");
+    console.error("Add faculty error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to sync user",
+    });
   }
 });
+
 
 /* -------------------- Add Class -------------------- */
 router.post("/add-class", upload.single("file"), async (req, res) => {
