@@ -14,5 +14,5 @@ const attendanceSchema = new mongoose.Schema({
 });
 
 attendanceSchema.index({ sessionId: 1, studentId: 1 }, { unique: true });
-
+attendanceSchema.index({ studentId: 1 });
 module.exports = mongoose.model("Attendance", attendanceSchema);

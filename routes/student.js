@@ -1,8 +1,9 @@
 const express = require("express");
 const Session = require("../models/Session");
 const Attendance = require("../models/Attendance");
-const { verifyPayload } = require("../utils/qr");
+const { verifyPayload ,verifyOnce} = require("../utils/qr");
 const { distanceMeters } = require("../utils/geo");
+const rateLimit = require("express-rate-limit");
 
 const router = express.Router();
 
@@ -15,19 +16,29 @@ function error(res, status, message, code) {
   });
 }
 
-/* -------------------- Scan QR -------------------- */router.post("/scan", async (req, res) => {
+
+router.use("/scan", rateLimit({
+  windowMs: 1000,
+  max: 5, // 5 scans per second per device
+}));
+
+/* -------------------- Scan QR -------------------- */
+
+router.post("/scan", async (req, res) => {
   try {
     const { payload, signature, studentId, deviceId, location } = req.body;
 
+    // ---------------- BASIC VALIDATION ----------------
     if (!payload || !signature || !studentId || !deviceId || !location) {
       return error(res, 400, "Missing required scan data", "MISSING_SCAN_DATA");
     }
 
-    if (!location.lat || !location.lng) {
+    if (location.lat == null || location.lng == null) {
       return error(res, 400, "Invalid location data", "INVALID_LOCATION");
     }
 
-    const isValidQR = verifyPayload(payload, signature);
+    // ---------------- QR VALIDATION ----------------
+    const isValidQR = verifyOnce(payload, signature);
     if (!isValidQR) {
       return error(res, 400, "Invalid or tampered QR code", "INVALID_QR");
     }
@@ -36,6 +47,7 @@ function error(res, status, message, code) {
       return error(res, 410, "QR code has expired", "QR_EXPIRED");
     }
 
+    // ---------------- SESSION ----------------
     const session = await Session.findOne({ sessionId: payload.sessionId });
     if (!session) {
       return error(res, 404, "Session not found", "SESSION_NOT_FOUND");
@@ -45,37 +57,40 @@ function error(res, status, message, code) {
       return error(res, 403, "Session already closed", "SESSION_CLOSED");
     }
 
-    // 🔥 FIX #1: ENSURE RECORD EXISTS
-    let record = await Attendance.findOne({
-      sessionId: payload.sessionId,
-      studentId,
-    });
-
-    if (!record) {
-      record = await Attendance.create({
-        sessionId: payload.sessionId,
-        studentId,
-        deviceId,
-        status: "INCOMPLETE",
-      });
+    // ---------------- SCAN TYPE ----------------
+    if (!["START_ACTIVE", "END_ACTIVE"].includes(payload.type)) {
+      return error(res, 400, "Invalid scan type", "INVALID_SCAN_TYPE");
     }
 
-    // 🔥 VALIDATE SESSION STATE
-    // if (
-    //   (payload.type === "START" &&
-    //     session.state !== "START_ACTIVE") ||
-    //   (payload.type === "END" &&
-    //     session.state !== "END_ACTIVE")
-    // ) {
-    //   return error(
-    //     res,
-    //     409,
-    //     "Invalid scan timing",
-    //     "INVALID_SESSION_STATE"
-    //   );
-    // }
+    // ---------------- ATTENDANCE RECORD ----------------
+    // let record = await Attendance.findOne({
+    //   sessionId: payload.sessionId,
+    //   studentId,
+    // });
 
-    // START SCAN
+    // if (!record) {
+    //   record = await Attendance.create({
+    //     sessionId: payload.sessionId,
+    //     studentId,
+    //     deviceId,
+    //     status: "INCOMPLETE",
+    //   });
+    // }
+    const record = await Attendance.findOneAndUpdate(
+  { sessionId: payload.sessionId, studentId },
+  {
+    $setOnInsert: {
+      sessionId: payload.sessionId,
+      studentId,
+      deviceId,
+      status: "INCOMPLETE",
+    },
+  },
+  { new: true, upsert: true }
+);
+
+
+    // ---------------- START SCAN ----------------
     if (payload.type === "START_ACTIVE") {
       if (record.startScanTime) {
         return error(
@@ -85,10 +100,11 @@ function error(res, status, message, code) {
           "START_ALREADY_MARKED"
         );
       }
+
       record.startScanTime = new Date();
     }
 
-    // END SCAN
+    // ---------------- END SCAN ----------------
     if (payload.type === "END_ACTIVE") {
       if (!record.startScanTime) {
         return error(
@@ -98,20 +114,37 @@ function error(res, status, message, code) {
           "START_NOT_MARKED"
         );
       }
+
+      if (record.endScanTime) {
+        return error(
+          res,
+          409,
+          "End attendance already marked",
+          "END_ALREADY_MARKED"
+        );
+      }
+
       record.endScanTime = new Date();
       record.status = "PRESENT";
     }
 
     await record.save();
 
-    return res.json({
+    // ---------------- SUCCESS ----------------
+    return res.status(200).json({
       success: true,
       message: "Attendance recorded successfully",
       data: record,
     });
   } catch (err) {
     console.error("QR Scan error:", err);
-    return error(res, 500, "Failed to process QR scan", "SCAN_FAILED");
+
+    return error(
+      res,
+      500,
+      "Failed to process QR scan",
+      "SCAN_FAILED"
+    );
   }
 });
 

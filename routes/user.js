@@ -223,7 +223,9 @@ router.get("/by-faculty/:facultyId", async (req, res) => {
 /* -------------------- Class Details -------------------- */
 router.get("/class/:classId", async (req, res) => {
   try {
+
     const cls = await Class.findOne({ classId: req.params.classId });
+    
     if (!cls) {
       return error(res, 404, "Class not found", "CLASS_NOT_FOUND");
     }

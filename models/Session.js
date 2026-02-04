@@ -72,4 +72,5 @@ const sessionSchema = new mongoose.Schema(
   }
 );
 
+sessionSchema.index({ sessionId: 1 });
 module.exports = mongoose.model("Session", sessionSchema);
