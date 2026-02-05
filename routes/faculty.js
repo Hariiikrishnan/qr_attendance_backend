@@ -70,7 +70,7 @@ router.post("/session/start", async (req, res) => {
       blockName,
       hourNumber,
       location,
-      radius: 50,
+      radius: 100,
       startTime: new Date(),
       state: "START_ACTIVE",
     });

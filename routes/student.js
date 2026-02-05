@@ -19,26 +19,46 @@ function error(res, status, message, code) {
 
 router.use("/scan", rateLimit({
   windowMs: 1000,
-  max: 5, // 5 scans per second per device
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_, res) => {
+    return res.status(429).json({
+      success: false,
+      message: "Too many scans, slow down",
+      errorCode: "RATE_LIMITED",
+    });
+  },
 }));
 
 /* -------------------- Scan QR -------------------- */
 
 router.post("/scan", async (req, res) => {
+  console.log("Hitting");
   try {
+    console.log("But not here");
     const { payload, signature, studentId, deviceId, location } = req.body;
 
-    // ---------------- BASIC VALIDATION ----------------
-    if (!payload || !signature || !studentId || !deviceId || !location) {
-      return error(res, 400, "Missing required scan data", "MISSING_SCAN_DATA");
-    }
 
-    if (location.lat == null || location.lng == null) {
-      return error(res, 400, "Invalid location data", "INVALID_LOCATION");
-    }
+    // ---------------- BASIC VALIDATION ----------------
+    // if (!payload || !signature || !studentId || !deviceId || !location) {
+    //   return error(res, 400, "Missing required scan data", "MISSING_SCAN_DATA");
+    // }
+
+    // if (location.lat == null || location.lng == null) {
+    //   return error(res, 400, "Invalid location data", "INVALID_LOCATION");
+    // }
 
     // ---------------- QR VALIDATION ----------------
-    const isValidQR = verifyOnce(payload, signature);
+   let isValidQR;
+    try {
+      isValidQR = verifyPayload(payload, signature);
+    } catch (e) {
+      console.error("verifyOnce error:", e);
+      return error(res, 400, "Invalid QR", "INVALID_QR_CODE");
+    }
+
+
     if (!isValidQR) {
       return error(res, 400, "Invalid or tampered QR code", "INVALID_QR");
     }
@@ -57,10 +77,20 @@ router.post("/scan", async (req, res) => {
       return error(res, 403, "Session already closed", "SESSION_CLOSED");
     }
 
-    // ---------------- SCAN TYPE ----------------
-    if (!["START_ACTIVE", "END_ACTIVE"].includes(payload.type)) {
-      return error(res, 400, "Invalid scan type", "INVALID_SCAN_TYPE");
+    const dist = distanceMeters(
+      payload.location.lat, payload.location.lng,
+      location.lat, location.lng,
+    );
+    
+    if (dist > payload.location.radius){
+      return error(res, 403, "Outside Block", "OUTSIDE");
+      // return res.status(403).send("Outside auditorium");
     }
+
+    // ---------------- SCAN TYPE ----------------
+    // if (!["START_ACTIVE", "END_ACTIVE"].includes(payload.type)) {
+    //   return error(res, 400, "Invalid scan type", "INVALID_SCAN_TYPE");
+    // }
 
     // ---------------- ATTENDANCE RECORD ----------------
     // let record = await Attendance.findOne({
@@ -76,59 +106,74 @@ router.post("/scan", async (req, res) => {
     //     status: "INCOMPLETE",
     //   });
     // }
-    const record = await Attendance.findOneAndUpdate(
+
+    let update = {};
+let setOnInsert = {
+  sessionId: payload.sessionId,
+  studentId,
+  deviceId,
+};
+
+// ---------------- START SCAN ----------------
+if (payload.type === "START_ACTIVE") {
+  const existing = await Attendance.findOne({
+    sessionId: payload.sessionId,
+    studentId,
+  });
+
+  if (existing?.startScanTime) {
+    return error(
+      res,
+      409,
+      "Start attendance already marked",
+      "START_ALREADY_MARKED"
+    );
+  }
+
+  update.startScanTime = new Date();
+  update.status = "INCOMPLETE";
+}
+
+// ---------------- END SCAN ----------------
+if (payload.type === "END_ACTIVE") {
+  const existing = await Attendance.findOne({
+    sessionId: payload.sessionId,
+    studentId,
+  });
+
+  if (!existing?.startScanTime) {
+    return error(
+      res,
+      409,
+      "Start attendance not marked yet",
+      "START_NOT_MARKED"
+    );
+  }
+
+  if (existing.endScanTime) {
+    return error(
+      res,
+      409,
+      "End attendance already marked",
+      "END_ALREADY_MARKED"
+    );
+  }
+
+  update.endScanTime = new Date();
+  update.status = "PRESENT";
+}
+
+// ✅ single atomic write — no conflicts
+const record = await Attendance.findOneAndUpdate(
   { sessionId: payload.sessionId, studentId },
   {
-    $setOnInsert: {
-      sessionId: payload.sessionId,
-      studentId,
-      deviceId,
-      status: "INCOMPLETE",
-    },
+    $setOnInsert: setOnInsert,
+    $set: update,
   },
   { new: true, upsert: true }
 );
 
 
-    // ---------------- START SCAN ----------------
-    if (payload.type === "START_ACTIVE") {
-      if (record.startScanTime) {
-        return error(
-          res,
-          409,
-          "Start attendance already marked",
-          "START_ALREADY_MARKED"
-        );
-      }
-
-      record.startScanTime = new Date();
-    }
-
-    // ---------------- END SCAN ----------------
-    if (payload.type === "END_ACTIVE") {
-      if (!record.startScanTime) {
-        return error(
-          res,
-          409,
-          "Start attendance not marked yet",
-          "START_NOT_MARKED"
-        );
-      }
-
-      if (record.endScanTime) {
-        return error(
-          res,
-          409,
-          "End attendance already marked",
-          "END_ALREADY_MARKED"
-        );
-      }
-
-      record.endScanTime = new Date();
-      record.status = "PRESENT";
-    }
-
-    await record.save();
 
     // ---------------- SUCCESS ----------------
     return res.status(200).json({
