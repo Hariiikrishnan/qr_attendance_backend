@@ -72,7 +72,7 @@ router.post("/session/start", async (req, res) => {
       location,
       radius: 500,
       startTime: new Date(),
-      state: "START_ACTIVE",
+      state: "S",
     });
 
     return res.status(201).json({
@@ -105,7 +105,7 @@ router.post("/session/qr", async (req, res) => {
       );
     }
 
-    if (!["START_ACTIVE", "END_ACTIVE"].includes(type)) {
+    if (!["S", "E"].includes(type)) {
       return error(
         res,
         400,
@@ -124,7 +124,7 @@ router.post("/session/qr", async (req, res) => {
       );
     }
 session.state = type;
-if (type === "END_ACTIVE") {
+if (type === "E") {
   session.endTime = new Date();
 }
     await session.save();
@@ -140,18 +140,9 @@ if (type === "END_ACTIVE") {
     }
 
     const qrData = signPayload({
-      sessionId: session.sessionId,
-      type,
-      issuedAt: Date.now(),
-      classId: session.classId,
-      hourNumber: session.hourNumber,
-      blockName: session.blockName,
-      location: {
-        lat: session.location.lat,
-        lng: session.location.lng,
-        radius: session.radius,
-      },
-      expiresAt: Date.now() + expiryMs,
+     s: session.sessionId,
+  t: type ,
+  e: Date.now() + expiryMs,
     });
 
     return res.json({

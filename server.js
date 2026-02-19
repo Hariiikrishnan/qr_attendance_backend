@@ -1,4 +1,5 @@
 const express = require("express");
+// require("node:dns/promises").setServers(["1.1.1.1", "8.8.8.8"]);
 const cors = require("cors");
 require("dotenv").config();
 
@@ -11,7 +12,6 @@ const userRoutes = require("./routes/user");
 const app = express();
 app.use(express.json());
 app.use(cors());
-
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header(

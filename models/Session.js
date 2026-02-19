@@ -54,8 +54,8 @@ const sessionSchema = new mongoose.Schema(
 
     state: {
       type: String,
-      enum: ["START_ACTIVE", "END_ACTIVE", "CLOSED"],
-      default: "START_ACTIVE",
+      // enum: ["START_ACTIVE", "END_ACTIVE", "CLOSED"],
+      default: "S",
     },
 
     startTime: {

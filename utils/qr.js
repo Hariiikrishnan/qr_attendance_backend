@@ -39,25 +39,62 @@ function verifyOnce(payload, signature) {
 
   return true;
 }
+// function signPayload(payload) {
+//     // console.log(payload);
+//   const data = JSON.stringify(payload);
+//   const signature = crypto
+//     .createHmac("sha256", SECRET)
+//     .update(data)
+//     .digest("hex");
+
+//   return { payload, signature };
+// }
 function signPayload(payload) {
-    // console.log(payload);
-  const data = JSON.stringify(payload);
+  const data = `${payload.s}|${payload.t}|${payload.e}`;
+
   const signature = crypto
     .createHmac("sha256", SECRET)
     .update(data)
-    .digest("hex");
-
-  return { payload, signature };
+    .digest("base64url"); // shorter than hex
+  console.log(`Signed : ${data}`);
+  return `${data}|${signature}`;
 }
 
-function verifyPayload(payload, signature) {
-    // console.log(payload);
+
+// function verifyPayload(payload, signature) {
+//     // console.log(payload);
+//   const expected = crypto
+//     .createHmac("sha256", SECRET)
+//     .update(JSON.stringify(payload))
+//     .digest("hex");
+
+//   return expected === signature;
+// }
+function verifyPayload(payload,sign) {
+  console.log("Session id : "+ payload.s);
+  const qrString = `${payload.s}|${payload.t}|${payload.e}`;
+  console.log("Verifying : "+qrString);
+  // const parts = qrString.split("|");
+
+  // if (parts.length !== 4) return false;
+
+  // const [s, t, e, signature] = parts;
+
+  // const data = `${s}|${t}|${e}`;
+
   const expected = crypto
     .createHmac("sha256", SECRET)
-    .update(JSON.stringify(payload))
-    .digest("hex");
+    .update(qrString)
+    .digest("base64url");
 
-  return expected === signature;
+    console.log("Expected : " + expected + " , Signature : " + sign);
+
+  // if (expected !== sign) return false;
+
+  // if (Date.now() > Number(e)) return false;
+
+  return expected === sign;
 }
+
 
 module.exports = { signPayload, verifyPayload ,verifyOnce };

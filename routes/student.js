@@ -52,9 +52,10 @@ router.post("/scan", async (req, res) => {
     // ---------------- QR VALIDATION ----------------
    let isValidQR;
     try {
+      console.log(payload);
       isValidQR = verifyPayload(payload, signature);
     } catch (e) {
-      console.error("verifyOnce error:", e);
+      console.error("verifyPayload error:", e);
       return error(res, 400, "Invalid QR", "INVALID_QR_CODE");
     }
 
@@ -63,12 +64,12 @@ router.post("/scan", async (req, res) => {
       return error(res, 400, "Invalid or tampered QR code", "INVALID_QR");
     }
 
-    if (payload.expiresAt && Date.now() > payload.expiresAt) {
+    if (payload.e && Date.now() > payload.e) {
       return error(res, 410, "QR code has expired", "QR_EXPIRED");
     }
 
     // ---------------- SESSION ----------------
-    const session = await Session.findOne({ sessionId: payload.sessionId });
+    const session = await Session.findOne({ sessionId: payload.s });
     if (!session) {
       return error(res, 404, "Session not found", "SESSION_NOT_FOUND");
     }
@@ -78,11 +79,11 @@ router.post("/scan", async (req, res) => {
     }
 
     const dist = distanceMeters(
-      payload.location.lat, payload.location.lng,
+      session.location.lat, session.location.lng,
       location.lat, location.lng,
     );
     
-    if (dist > payload.location.radius){
+    if (dist > session.location.radius){
       return error(res, 403, "Outside Block", "OUTSIDE");
       // return res.status(403).send("Outside auditorium");
     }
@@ -109,15 +110,15 @@ router.post("/scan", async (req, res) => {
 
     let update = {};
 let setOnInsert = {
-  sessionId: payload.sessionId,
+  sessionId: payload.s,
   studentId,
   deviceId,
 };
 
 // ---------------- START SCAN ----------------
-if (payload.type === "START_ACTIVE") {
+if (payload.t === "S") {
   const existing = await Attendance.findOne({
-    sessionId: payload.sessionId,
+    sessionId: payload.s,
     studentId,
   });
 
@@ -135,9 +136,9 @@ if (payload.type === "START_ACTIVE") {
 }
 
 // ---------------- END SCAN ----------------
-if (payload.type === "END_ACTIVE") {
+if (payload.t === "E") {
   const existing = await Attendance.findOne({
-    sessionId: payload.sessionId,
+    sessionId: payload.s,
     studentId,
   });
 
@@ -163,15 +164,15 @@ if (payload.type === "END_ACTIVE") {
   update.status = "PRESENT";
 }
 
-// ✅ single atomic write — no conflicts
-const record = await Attendance.findOneAndUpdate(
-  { sessionId: payload.sessionId, studentId },
-  {
-    $setOnInsert: setOnInsert,
-    $set: update,
-  },
-  { new: true, upsert: true }
-);
+      // ✅ single atomic write — no conflicts
+      const record = await Attendance.findOneAndUpdate(
+        { sessionId: payload.s, studentId },
+        {
+          $setOnInsert: setOnInsert,
+          $set: update,
+        },
+        { new: true, upsert: true }
+      );
 
 
 
