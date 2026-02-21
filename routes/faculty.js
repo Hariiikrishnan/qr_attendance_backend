@@ -22,6 +22,75 @@ function error(res, status, message, code) {
 }
 
 /* -------------------- Start Session -------------------- */
+// router.post("/session/start", async (req, res) => {
+//   try {
+//     const {
+//       facultyId,
+//       classId,
+//       className,
+//       blockName,
+//       hourNumber,
+//       location,
+//     } = req.body;
+
+//     if (
+//       !facultyId ||
+//       !classId ||
+//       !className ||
+//       !blockName ||
+//       !hourNumber ||
+//       !location?.lat ||
+//       !location?.lng
+//     ) {
+//       return error(
+//         res,
+//         400,
+//         "Missing required session details",
+//         "MISSING_FIELDS"
+//       );
+//     }
+
+//     const sessionId = `${className}_H${hourNumber}_${formatDate()}`;
+
+//     const existing = await Session.findOne({ sessionId });
+//     if (existing) {
+//       return error(
+//         res,
+//         409,
+//         "Session already exists for this hour",
+//         "SESSION_ALREADY_EXISTS"
+//       );
+//     }
+
+//     const session = await Session.create({
+//       sessionId,
+//       facultyId,
+//       classId,
+//       className,
+//       blockName,
+//       hourNumber,
+//       location,
+//       radius: 500,
+//       startTime: new Date(),
+//       state: "S",
+//     });
+
+//     return res.status(201).json({
+//       success: true,
+//       message: "Session started successfully",
+//       data: session,
+//     });
+//   } catch (err) {
+//     console.error("Session start error:", err);
+//     return error(
+//       res,
+//       500,
+//       "Unable to start session",
+//       "SESSION_START_FAILED"
+//     );
+//   }
+// });
+
 router.post("/session/start", async (req, res) => {
   try {
     const {
@@ -31,45 +100,46 @@ router.post("/session/start", async (req, res) => {
       blockName,
       hourNumber,
       location,
+      isAudi = false,
     } = req.body;
 
     if (
       !facultyId ||
-      !classId ||
-      !className ||
       !blockName ||
-      !hourNumber ||
       !location?.lat ||
       !location?.lng
     ) {
-      return error(
-        res,
-        400,
-        "Missing required session details",
-        "MISSING_FIELDS"
-      );
+      return error(res, 400, "Missing required session details", "MISSING_FIELDS");
     }
 
-    const sessionId = `${className}_H${hourNumber}_${formatDate()}`;
+    // Normal class validation
+    if (!isAudi && (!classId || !className || !hourNumber)) {
+      return error(res, 400, "Missing class session details", "MISSING_CLASS_FIELDS");
+    }
+
+    // Generate sessionId differently
+    let sessionId;
+
+    if (isAudi) {
+      sessionId = `AUDI_${blockName}_${formatDate()}`;
+    } else {
+      sessionId = `${className}_H${hourNumber}_${formatDate()}`;
+    }
 
     const existing = await Session.findOne({ sessionId });
     if (existing) {
-      return error(
-        res,
-        409,
-        "Session already exists for this hour",
-        "SESSION_ALREADY_EXISTS"
-      );
+      return error(res, 409, "Session already exists", "SESSION_ALREADY_EXISTS");
     }
 
     const session = await Session.create({
       sessionId,
       facultyId,
-      classId,
-      className,
+      classId: isAudi ? undefined : classId,
+      className: isAudi ? undefined : className,
+      hourNumber: isAudi ? undefined : hourNumber,
       blockName,
-      hourNumber,
       location,
+      isAudi,
       radius: 500,
       startTime: new Date(),
       state: "S",
@@ -77,19 +147,18 @@ router.post("/session/start", async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "Session started successfully",
+      message: isAudi
+        ? "Auditorium session started"
+        : "Class session started",
       data: session,
     });
+
   } catch (err) {
     console.error("Session start error:", err);
-    return error(
-      res,
-      500,
-      "Unable to start session",
-      "SESSION_START_FAILED"
-    );
+    return error(res, 500, "Unable to start session", "SESSION_START_FAILED");
   }
 });
+
 
 /* -------------------- Generate QR -------------------- */
 router.post("/session/qr", async (req, res) => {
@@ -294,6 +363,7 @@ router.get("/session/:sId/attendance", async (req, res) => {
     );
   }
 });
+
 
 /* -------------------- Update Attendance -------------------- */
 router.put("/session/:sId/attendance", async (req, res) => {

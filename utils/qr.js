@@ -56,7 +56,7 @@ function signPayload(payload) {
     .createHmac("sha256", SECRET)
     .update(data)
     .digest("base64url"); // shorter than hex
-  console.log(`Signed : ${data}`);
+
   return `${data}|${signature}`;
 }
 
@@ -71,23 +71,16 @@ function signPayload(payload) {
 //   return expected === signature;
 // }
 function verifyPayload(payload,sign) {
-  console.log("Session id : "+ payload.s);
+
   const qrString = `${payload.s}|${payload.t}|${payload.e}`;
-  console.log("Verifying : "+qrString);
-  // const parts = qrString.split("|");
 
-  // if (parts.length !== 4) return false;
-
-  // const [s, t, e, signature] = parts;
-
-  // const data = `${s}|${t}|${e}`;
 
   const expected = crypto
     .createHmac("sha256", SECRET)
     .update(qrString)
     .digest("base64url");
 
-    console.log("Expected : " + expected + " , Signature : " + sign);
+
 
   // if (expected !== sign) return false;
 

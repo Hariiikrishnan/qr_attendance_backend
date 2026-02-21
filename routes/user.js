@@ -258,6 +258,53 @@ router.get("/class/:classId", async (req, res) => {
 });
 
 /* -------------------- Full Attendance -------------------- */
+// router.get("/session/:sId/attendance/full", async (req, res) => {
+//   try {
+//     const session = await Session.findOne({ sessionId: req.params.sId });
+//     if (!session) {
+//       return error(res, 404, "Session not found", "SESSION_NOT_FOUND");
+//     }
+
+//     const filePath = path.join(uploadDir, `${session.className}.xlsx`);
+//     if (!fs.existsSync(filePath)) {
+//       return error(res, 404, "Class file missing", "EXCEL_NOT_FOUND");
+//     }
+
+//     const workbook = XLSX.readFile(filePath);
+//     const sheet = workbook.Sheets[workbook.SheetNames[0]];
+//     const classStudents = XLSX.utils.sheet_to_json(sheet);
+
+//     const attendance = await Attendance.find({
+//       sessionId: req.params.sId,
+//     });
+
+//     const attendanceMap = {};
+//     attendance.forEach((a) => {
+//       attendanceMap[a.studentId] = a.status;
+//     });
+
+//     const merged = classStudents.map((s) => ({
+//       studentId: s.RegNo || s["Reg No"] || s["Register No"],
+//       name: s.Name || s.name || "",
+//       status: attendanceMap[s.RegNo] || "ABSENT",
+//     }));
+
+//     return res.json({
+//       success: true,
+//       message: "Full attendance fetched",
+//       data: merged,
+//     });
+//   } catch (err) {
+//     console.error(err);
+//     return error(
+//       res,
+//       500,
+//       "Failed to fetch attendance",
+//       "FETCH_FULL_ATTENDANCE_FAILED"
+//     );
+//   }
+// });
+
 router.get("/session/:sId/attendance/full", async (req, res) => {
   try {
     const session = await Session.findOne({ sessionId: req.params.sId });
@@ -265,6 +312,24 @@ router.get("/session/:sId/attendance/full", async (req, res) => {
       return error(res, 404, "Session not found", "SESSION_NOT_FOUND");
     }
 
+    // ===============================
+    // AUDITORIUM SESSION
+    // ===============================
+    if (session.isAudi) {
+      const attendance = await Attendance.find({
+        sessionId: req.params.sId,
+      }).sort({ createdAt: 1 });
+
+      return res.json({
+        success: true,
+        message: "Auditorium attendance fetched",
+        data: attendance,
+      });
+    }
+
+    // ===============================
+    // CLASS SESSION (OLD LOGIC)
+    // ===============================
     const filePath = path.join(uploadDir, `${session.className}.xlsx`);
     if (!fs.existsSync(filePath)) {
       return error(res, 404, "Class file missing", "EXCEL_NOT_FOUND");
@@ -294,6 +359,7 @@ router.get("/session/:sId/attendance/full", async (req, res) => {
       message: "Full attendance fetched",
       data: merged,
     });
+
   } catch (err) {
     console.error(err);
     return error(
